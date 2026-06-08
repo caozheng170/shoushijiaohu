@@ -30,11 +30,19 @@
       background-color: #0a0a0c;
       font-family: "Inter", sans-serif;
       user-select: none;
-      touch-action: none;
+      touch-action: manipulation;
     }
     canvas {
       display: block;
       touch-action: none;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+    }
+    button, input[type="range"], .pointer-events-auto {
+      touch-action: manipulation;
     }
     .font-display {
       font-family: "Outfit", sans-serif;
@@ -84,7 +92,7 @@
         <p class="flex items-center gap-3"><span class="text-white/40">✦</span> 手势：两指<strong class="text-white/80 font-medium">捏合抓持</strong>，快速<strong class="text-white/80 font-medium">上抛掀起/下甩落回</strong></p>
       </div>
 
-      <button onclick="startSystem()" class="w-full py-4 rounded-full border border-white/15 bg-white/5 hover:bg-white hover:text-black transition-all duration-300 text-white font-medium uppercase tracking-[0.25em] text-xs cursor-pointer hover:border-white">
+      <button onclick="startSystem()" ontouchstart="startSystem()" class="w-full py-4 rounded-full border border-white/15 bg-white/5 hover:bg-white hover:text-black transition-all duration-300 text-white font-medium uppercase tracking-[0.25em] text-xs cursor-pointer hover:border-white">
         Initialize System
       </button>
       <p class="text-[10px] text-white/30 tracking-wider mt-5">需要授予摄像头访问权限以进行手势识别</p>
