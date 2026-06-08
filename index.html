@@ -103,7 +103,7 @@
   <input type="file" id="media-upload" accept="image/*,video/*" class="hidden" onchange="handleFileSelect(event)">
 
   <!-- UI Action HUD Overlay -->
-  <div id="ui-hud" class="absolute inset-0 pointer-events-none z-40 transition-opacity duration-300">
+  <div id="ui-hud" class="fixed inset-0 pointer-events-none z-40 transition-opacity duration-300">
     <!-- Top Center: Scenario Switcher Segmented Control (Optimized to be super slim) -->
     <div class="hud-control absolute top-5 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex items-center bg-black/55 border border-white/10 p-1 rounded-full backdrop-blur-xl shadow-2xl transition-all duration-300">
       <button onclick="switchScenario(1)" id="scenario-1-btn" class="px-3.5 py-1.5 rounded-full text-[10px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white bg-white/10 border border-white/5 shadow-md">
@@ -1589,11 +1589,19 @@
     }
 
     // Manual/Fallback UI Cursors mouse controller mappings
-    function mousePressed() {
+    function mousePressed(event) {
       if (!systemStarted) return;
+      
+      // Prevent interactions if clicking on HUD elements, start mask or interactive elements
+      let target = event ? event.target : (window.event ? window.event.target : null);
+      if (target) {
+        if (target.closest('#ui-hud') || target.closest('#start-mask') || target.closest('button') || target.closest('input') || target.closest('.hud-control')) {
+          return;
+        }
+      }
+      
       // Prevent grabs outside UI elements
       if (mouseX < 0 || mouseX > width || mouseY < 0 || mouseY > height) return;
-      if (mouseY > height - 80 && mouseX < 450) return; // avoid blocking toolbars
       
       // Clean up duplicates
       cleanupMouseControllers();
@@ -1613,8 +1621,16 @@
       controllers.push(mc);
     }
 
-    function mouseDragged() {
+    function mouseDragged(event) {
       if (!systemStarted) return;
+      
+      let target = event ? event.target : (window.event ? window.event.target : null);
+      if (target) {
+        if (target.closest('#ui-hud') || target.closest('#start-mask') || target.closest('button') || target.closest('input') || target.closest('.hud-control')) {
+          return;
+        }
+      }
+
       let mc = controllers.find(c => c.id === 'mouse');
       if (mc) {
         mc.px = mc.x;
@@ -1625,7 +1641,7 @@
       }
     }
 
-    function mouseReleased() {
+    function mouseReleased(event) {
       if (!systemStarted) return;
       let idx = controllers.findIndex(c => c.id === 'mouse');
       if (idx !== -1) {
@@ -1643,16 +1659,34 @@
     }
 
     // Prevent mobile scrolling & drag behaviors globally
-    function touchStarted() {
-      mousePressed();
+    function touchStarted(event) {
+      let target = event ? event.target : (window.event ? window.event.target : null);
+      if (target) {
+        if (target.closest('#ui-hud') || target.closest('#start-mask') || target.closest('button') || target.closest('input') || target.closest('.hud-control')) {
+          return true; // Allow native interaction with HUD / Sliders etc.
+        }
+      }
+      mousePressed(event);
       return false;
     }
-    function touchMoved() {
-      mouseDragged();
+    function touchMoved(event) {
+      let target = event ? event.target : (window.event ? window.event.target : null);
+      if (target) {
+        if (target.closest('#ui-hud') || target.closest('#start-mask') || target.closest('button') || target.closest('input') || target.closest('.hud-control')) {
+          return true; // Don't block sliders or panel controls scrolling/moving
+        }
+      }
+      mouseDragged(event);
       return false;
     }
-    function touchEnded() {
-      mouseReleased();
+    function touchEnded(event) {
+      let target = event ? event.target : (window.event ? window.event.target : null);
+      if (target) {
+        if (target.closest('#ui-hud') || target.closest('#start-mask') || target.closest('button') || target.closest('input') || target.closest('.hud-control')) {
+          return true;
+        }
+      }
+      mouseReleased(event);
       return false;
     }
 
