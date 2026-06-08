@@ -1,0 +1,2135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>透明物理幕布与手势控制 - p5.js + MediaPipe</title>
+  
+  <!-- Tailwind CSS V4 CDN -->
+  <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+  
+  <!-- Google Fonts: Inter, JetBrains Mono, Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+
+  <!-- p5.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+  
+  <!-- MediaPipe Hands CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.4.1646424915/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #0a0a0c;
+      font-family: "Inter", sans-serif;
+      user-select: none;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+      touch-action: none;
+    }
+    .font-display {
+      font-family: "Outfit", sans-serif;
+    }
+    .font-mono {
+      font-family: "JetBrains Mono", monospace;
+    }
+    /* Custom range slider thumb styling */
+    input[type="range"]::-webkit-slider-runnable-track {
+      background: rgba(255, 255, 255, 0.12);
+      height: 2px;
+      border-radius: 9999px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      background: #ffffff;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-top: -5px;
+      transition: transform 0.15s ease;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.3);
+    }
+  </style>
+</head>
+<body class="relative">
+
+  <!-- Startup Screen Overlay -->
+  <div id="start-mask" class="absolute inset-0 z-50 bg-[#0a0a0c]/90 backdrop-blur-xl flex items-center justify-center transition-all duration-700">
+    <div class="text-center max-w-md px-6">
+      <div class="mb-10 space-y-3">
+        <div class="w-16 h-16 mx-auto mb-6 flex items-center justify-center bg-white/[0.04] border border-white/10 rounded-full text-3xl shadow-2xl backdrop-blur-md">
+          🌊
+        </div>
+        <h1 class="text-4xl font-light tracking-tight text-white font-display">Liquid Veil</h1>
+        <p class="text-[10px] uppercase tracking-[0.4em] text-white/40 font-mono">Physics-Based Interaction Study</p>
+      </div>
+      
+      <div class="text-left space-y-3.5 text-white/50 text-xs mb-10 leading-relaxed border-t border-b border-white/5 py-8">
+        <p class="flex items-center gap-3"><span class="text-white/40">✦</span> 底层：全屏前置摄像头实时镜面画面</p>
+        <p class="flex items-center gap-3"><span class="text-white/40">✦</span> 中层：自定义背景媒体 (图片 / 视频)</p>
+        <p class="flex items-center gap-3"><span class="text-white/40">✦</span> 表层：物理 Verlet 算法液态变幻幕布</p>
+        <p class="flex items-center gap-3"><span class="text-white/40">✦</span> 手势：两指<strong class="text-white/80 font-medium">捏合抓持</strong>，快速<strong class="text-white/80 font-medium">上抛掀起/下甩落回</strong></p>
+      </div>
+
+      <button onclick="startSystem()" class="w-full py-4 rounded-full border border-white/15 bg-white/5 hover:bg-white hover:text-black transition-all duration-300 text-white font-medium uppercase tracking-[0.25em] text-xs cursor-pointer hover:border-white">
+        Initialize System
+      </button>
+      <p class="text-[10px] text-white/30 tracking-wider mt-5">需要授予摄像头访问权限以进行手势识别</p>
+    </div>
+  </div>
+
+  <!-- Hidden Web File Inputs -->
+  <input type="file" id="media-upload" accept="image/*,video/*" class="hidden" onchange="handleFileSelect(event)">
+
+  <!-- UI Action HUD Overlay -->
+  <div id="ui-hud" class="absolute inset-0 pointer-events-none z-40 transition-opacity duration-300">
+    <!-- Top Center: Scenario Switcher Segmented Control (Optimized to be super slim) -->
+    <div class="hud-control absolute top-5 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex items-center bg-black/55 border border-white/10 p-1 rounded-full backdrop-blur-xl shadow-2xl transition-all duration-300">
+      <button onclick="switchScenario(1)" id="scenario-1-btn" class="px-3.5 py-1.5 rounded-full text-[10px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white bg-white/10 border border-white/5 shadow-md">
+        <span>📺</span>电视幕布
+      </button>
+      <button onclick="switchScenario(2)" id="scenario-2-btn" class="px-3.5 py-1.5 rounded-full text-[10px] font-medium tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white/60 hover:text-white hover:bg-white/5">
+        <span>✨</span>撕保鲜膜
+      </button>
+    </div>
+
+    <!-- Top-Right: Toggle HUD Visibility Panel (Discrete circular bubble) -->
+    <div class="absolute top-5 right-5 pointer-events-auto">
+      <button onclick="toggleUI()" class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center bg-black/55 hover:bg-white/10 transition-all backdrop-blur-xl active:scale-95 cursor-pointer text-white shadow-xl" title="切换 UI 显示">
+        <svg id="eye-icon-open" class="w-4.5 h-4.5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        <svg id="eye-icon-closed" class="w-4.5 h-4.5 opacity-70 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18"/></svg>
+      </button>
+    </div>
+
+    <!-- Bottom Left: Compact Single-Row Telemetry badge & Adaptive Tip Bubble -->
+    <div class="hud-control transition-all duration-300 absolute bottom-5 left-5 pointer-events-none flex flex-col gap-2 max-w-[calc(100vw-2.5rem)] z-40">
+      <div class="pointer-events-auto bg-black/55 border border-white/10 rounded-full h-8 px-3 inline-flex items-center gap-2 shadow-lg backdrop-blur-xl text-[9.5px] font-mono text-white/50 select-none">
+        <span id="telemetry-engine-dot" class="w-1.5 h-1.5 bg-amber-400 rounded-full animate-pulse"></span>
+        <span id="telemetry-engine-title" class="text-white/80 font-medium tracking-wide">M-Pipe Loading</span>
+        <span class="text-white/10">|</span>
+        
+        <span id="telemetry-status" class="text-sky-300 font-semibold tracking-wide">FREE</span>
+        <span class="text-white/10">|</span>
+        
+        <span class="hidden sm:inline">Ratio:</span><span id="telemetry-pinch" class="text-white font-semibold">0.000</span>
+        <span class="hidden md:inline">Dist: <span id="telemetry-dist" class="text-white font-semibold">0.000</span></span>
+      </div>
+
+      <!-- Live Tip Dialogue Block (Slim and clean) -->
+      <div id="telemetry-tip" class="pointer-events-auto text-[9.5px] font-mono text-white/60 max-w-[280px] sm:max-w-[420px] leading-relaxed drop-shadow bg-black/55 px-3 py-1.5 rounded-2xl border border-white/10 shadow-lg select-none backdrop-blur-xl">
+        正在加载手势追踪模块...
+      </div>
+
+      <!-- Keep targets hidden in DOM to satisfy update loop seamlessly without redundant layout weights -->
+      <div class="hidden">
+        <span id="telemetry-intensity-num">0%</span>
+        <div id="telemetry-bar-fill"></div>
+        <div id="telemetry-marker"></div>
+        <span id="telemetry-limit-label"></span>
+      </div>
+    </div>
+
+    <!-- Bottom Right: Parameters and Actions, each as an independent compact glassmorphic pill -->
+    <div class="hud-control transition-all duration-300 absolute bottom-5 right-5 pointer-events-none flex flex-col items-end gap-2 max-w-[calc(100vw-2.5rem)] text-white select-none z-40">
+      
+      <!-- Row of Sliders (Pill 1 & Pill 2) -->
+      <div class="flex flex-col sm:flex-row gap-2 pointer-events-auto">
+        <!-- Live Sensitivity Pill -->
+        <div class="bg-black/55 backdrop-blur-xl border border-white/10 rounded-full h-8 px-3 inline-flex items-center gap-2 shadow-lg">
+          <span class="text-[9.5px] font-mono text-white/50 tracking-wider">⚡ 灵敏度</span>
+          <input type="range" id="sensitivity-slider" min="10" max="95" step="1" value="10" oninput="updatePinchSensitivity(this.value)" class="w-16 sm:w-20 accent-white h-[2px] bg-white/20 rounded-lg cursor-pointer appearance-none outline-none">
+          <span id="sensitivity-value" class="text-[9.5px] font-mono text-white/90 min-w-[28px] text-right font-semibold">10%</span>
+        </div>
+
+        <!-- Live Scale Pill -->
+        <div class="bg-black/55 backdrop-blur-xl border border-white/10 rounded-full h-8 px-3 inline-flex items-center gap-2 shadow-lg">
+          <span class="text-[9.5px] font-mono text-white/50 tracking-wider">🔍 缩放</span>
+          <input type="range" id="scale-slider" min="0.4" max="2.2" step="0.05" value="1.0" oninput="updateMediaScale(this.value)" class="w-16 sm:w-20 accent-white h-[2px] bg-white/20 rounded-lg cursor-pointer appearance-none outline-none">
+          <span id="scale-value" class="text-[9.5px] font-mono text-white/90 min-w-[28px] text-right font-semibold">1.0x</span>
+        </div>
+      </div>
+
+      <!-- Row of Individual Quick Action Buttons (Pill 3, Pill 4, Pill 5) -->
+      <div class="flex flex-wrap justify-end gap-1.5 pointer-events-auto">
+        <!-- Mirror Option -->
+        <button id="mirror-btn" onclick="toggleMirror()" class="bg-black/55 hover:bg-white/10 active:scale-95 border border-white/10 rounded-full h-8 px-3 flex items-center gap-1.5 shadow-lg text-[9.5px] font-mono text-white/85 tracking-wider cursor-pointer transition-all">
+          <span>📹 镜像: <span id="mirror-indicator" class="text-green-300 font-semibold font-mono">ON</span></span>
+        </button>
+
+        <!-- Audio Option (only visible for videos) -->
+        <button id="audio-btn" onclick="toggleAudio()" class="bg-black/55 hover:bg-white/10 active:scale-95 border border-white/10 rounded-full h-8 px-3 flex items-center gap-1.5 shadow-lg text-[9.5px] font-mono text-white/85 tracking-wider cursor-pointer transition-all hidden">
+          <span>🔊 声音: <span id="audio-indicator" class="text-green-300 font-semibold font-mono">ON</span></span>
+        </button>
+
+        <!-- Reset Mesh Option -->
+        <button onclick="resetClothMesh()" class="bg-black/55 hover:bg-white/10 hover:border-amber-400/40 active:scale-95 border border-white/10 rounded-full h-8 px-3 flex items-center gap-1.5 shadow-lg text-[9.5px] font-mono text-amber-300 tracking-wider cursor-pointer transition-all">
+          <span>🔄 一键归位</span>
+        </button>
+
+        <!-- Import Media Option -->
+        <button onclick="triggerUpload()" class="bg-white hover:bg-white/90 active:scale-95 rounded-full h-8 px-3.5 flex items-center gap-1.5 shadow-xl text-[9.5px] font-mono text-black font-bold uppercase cursor-pointer transition-all">
+          <span>📥 导入媒体</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- P5.js Container Element -->
+  <div id="canvas-container" class="w-full h-full"></div>
+
+  <!-- Inline Script executing p5.js and MediaPipe Hands -->
+  <script>
+    // System configuration states
+    let systemStarted = false;
+    let showUI = true;
+    let isWebcamMirrored = true;
+    let mediaScale = 1.0;
+    let pinchSensitivity = 10; // 10 to 95, default 10
+    let isVideoMuted = false; // default to unmuted so manually loaded videos have sound!
+
+    // Scenario Switching system states
+    let currentScenario = 1; // 1: TV Curtain, 2: Tearing Cling Film
+    let isTorn = false;
+    let dualPinchActive = false;
+    let initialPinchDist = 0;
+    let tearProgress = 0.0;
+    let simulatedTearActive = false;
+    let filmAlpha = 1.0;
+
+    function getRowSeveredFactor(r) {
+      if (currentScenario !== 2) return 0.0;
+      if (isTorn) return 1.0;
+      if (tearProgress < 0.15) return 0.0;
+      
+      // Map tearProgress [0.15, 0.90] to rupture range
+      let t = constrain(map(tearProgress, 0.15, 0.90, 0.0, 1.0), 0.0, 1.0);
+      let midRow = (rows - 1) / 2;
+      let distFromCenter = Math.abs(r - midRow);
+      let maxAllowedDist = (rows / 2) * t;
+      
+      // Smooth decay over narrow row transition region to avoid sudden snapping
+      let transitionWidth = 1.8;
+      let diff = maxAllowedDist - distFromCenter;
+      
+      if (diff >= transitionWidth) {
+        return 1.0;
+      } else if (diff <= -transitionWidth) {
+        return 0.0;
+      } else {
+        let pct = (diff + transitionWidth) / (2 * transitionWidth);
+        // smoothstep curve
+        return pct * pct * (3 - 2 * pct);
+      }
+    }
+
+    function isRowSevered(r) {
+      if (currentScenario !== 2) return false;
+      if (isTorn) return true;
+      return getRowSeveredFactor(r) >= 0.5;
+    }
+
+    function isStickSevered(stick) {
+      if (currentScenario !== 2) return false;
+      if (isTorn) return stick.isMiddleLink;
+      if (tearProgress < 0.15) return false;
+      
+      if (stick.isMiddleLink) {
+        let r1 = stick.p1.row;
+        let r2 = stick.p2.row;
+        let r = Math.floor((r1 + r2) / 2);
+        return getRowSeveredFactor(r) >= 1.0; // considered fully severed when factor reaches 1.0
+      }
+      return false;
+    }
+
+    function getPinchThresholds() {
+      // Scale pinchRatio threshold based on pinchSensitivity
+      let sensFactor = pinchSensitivity / 100.0;
+      let ratioThresh = 0.24 + (sensFactor * 0.40); // sensitive means higher threshold (easier to reach trigger point)
+      let distThresh = 0.015 + (sensFactor * 0.05);
+      let releaseThresh = ratioThresh + 0.12; 
+      return {
+        ratio: ratioThresh,
+        dist: distThresh,
+        release: releaseThresh
+      };
+    }
+
+    // Media resources
+    let rawCapture = null; // webcam stream
+    let uploadedImage = null; // uploaded background image
+    let uploadedVideo = null; // uploaded looping background video
+    let lastUploadedFile = null;
+
+    // Cloth mesh configuration parameters
+    let cols = 38;
+    let rows = 24;
+    let points = []; // 2D grid array points[col][row]
+    let sticks = []; // list of length constraints
+
+    let friction = 0.96;
+    let gravity = 0.10;
+    let solverIterations = 10;
+    let stickStiffness = 0.30;
+    let bendStiffness = 0.08; // extremely soft drape structure
+
+    let liftPulse = 0.0; // thrown decay rate coefficient
+
+    let clothWidth = 0;
+    let clothHeight = 0;
+    let startX = 0;
+    let startY = 0;
+
+    // Kinetic Interaction & Tracking controllers
+    let controllers = []; // records mouse and hand interaction positions
+    let handIdCounter = 0;
+    let isCameraActive = false;
+    let isMediaPipeLoaded = false;
+
+    // MediaPipe Hands instance
+    let mpHandsInstance = null;
+
+    // p5.js canvas functions
+    function setup() {
+      let canvas = createCanvas(windowWidth, windowHeight);
+      canvas.parent('canvas-container');
+      
+      // Initialize dynamic dimensions adaptively inside screen sizes
+      initClothMesh();
+      
+      // Configure global page drop support for background media files
+      window.addEventListener('dragover', (e) => e.preventDefault());
+      window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+          handleFileInput(e.dataTransfer.files[0]);
+        }
+      });
+    }
+
+    function draw() {
+      clear(); // Keep background clear to stack with custom CSS backgrounds if any
+      background(11, 12, 16);
+
+      // 1. Bottom: Fullscreen Camera view synchronized to top layer
+      drawWebcamBackground();
+
+      // 2. Middle: Uploaded artwork / video background centered on layout
+      drawMiddleMedia();
+
+      // 3. Top: Physical update and render of transparent cloth mesh
+      updateClothSimulation();
+      drawTransparentCurtain();
+
+      // 4. Custom active interactive cursors (ripples & handles)
+      drawActiveCursors();
+
+      // 5. Diagnostics Overlay
+      drawHUDTelemetry();
+    }
+
+    // Adaptively configures mesh bounds on layout resizing
+    function initClothMesh() {
+      // Clear tearing states on initialization or reset
+      isTorn = false;
+      dualPinchActive = false;
+      tearProgress = 0.0;
+      simulatedTearActive = false;
+      filmAlpha = 1.0;
+      
+      points = [];
+      sticks = [];
+
+      // Calculate width and height for a 16:9 curtain, scaling with mediaScale (zoom)
+      let baseW = width * 0.54 * mediaScale; // Base 16:9 width scaled by zoom (mediaScale)
+      let baseH = baseW * 9 / 16;
+      
+      // Safety bounds for smaller or square screens
+      if (baseH > height * 0.68) {
+        baseH = height * 0.68;
+        baseW = baseH * 16 / 9;
+      }
+      if (baseW < 320 && width > 320) {
+        baseW = 320;
+        baseH = baseW * 9 / 16;
+      }
+
+      clothWidth = baseW;
+      clothHeight = baseH;
+      startX = (width - clothWidth) / 2;
+      startY = (height - clothHeight) / 2 - 25; // perfectly centered vertically, slightly offset upward
+
+      let colSpacing = clothWidth / (cols - 1);
+      let rowSpacing = clothHeight / (rows - 1);
+
+      // Create Particle instances
+      for (let c = 0; c < cols; c++) {
+        points[c] = [];
+        for (let r = 0; r < rows; r++) {
+          let x = startX + c * colSpacing;
+          let y = startY + r * rowSpacing;
+          
+          let isPinned = false;
+          if (currentScenario === 1) {
+            isPinned = (r === 0); // Pinned top boundary only
+          } else {
+            // Scenario 2: Cling wrap is tightly pinned at all 4 outer edges!
+            isPinned = (r === 0 || r === rows - 1 || c === 0 || c === cols - 1);
+          }
+          
+          points[c][r] = {
+            x: x + random(-1.5, 1.5), // slight initial non-irregular wave offset
+            y: y + random(-1.5, 1.5),
+            px: x,
+            py: y,
+            origX: x,
+            origY: y,
+            col: c,
+            row: r,
+            pinned: isPinned,
+            grabbed: false,
+            grabOffsetX: 0,
+            grabOffsetY: 0
+          };
+        }
+      }
+
+      // Middle column index computation (symmetrical split)
+      let midCol = Math.floor(cols / 2) - 1;
+
+      // 1. Structural constraints (horizontal / vertical edges)
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          if (c < cols - 1) {
+            let isMiddleLink = (c === midCol);
+            sticks.push({
+              p1: points[c][r],
+              p2: points[c + 1][r],
+              targetLength: colSpacing,
+              stiffness: stickStiffness,
+              type: 'structural',
+              isMiddleLink: isMiddleLink
+            });
+          }
+          if (r < rows - 1) {
+            sticks.push({
+              p1: points[c][r],
+              p2: points[c][r + 1],
+              targetLength: rowSpacing,
+              stiffness: stickStiffness,
+              type: 'structural'
+            });
+          }
+        }
+      }
+
+      // 2. Bend Constraints (Soft fabric stiffness stabilizer over length 2)
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          if (c < cols - 2) {
+            let isMiddleLink = (c === midCol - 1 || c === midCol);
+            sticks.push({
+              p1: points[c][r],
+              p2: points[c + 2][r],
+              targetLength: colSpacing * 2,
+              stiffness: bendStiffness,
+              type: 'bend',
+              isMiddleLink: isMiddleLink
+            });
+          }
+          if (r < rows - 2) {
+            sticks.push({
+              p1: points[c][r],
+              p2: points[c][r + 2],
+              targetLength: rowSpacing * 2,
+              stiffness: bendStiffness,
+              type: 'bend'
+            });
+          }
+        }
+      }
+    }
+
+    function resetClothMesh() {
+      initClothMesh();
+      liftPulse = 0;
+      controllers = [];
+    }
+
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      initClothMesh();
+    }
+
+    // Physical loop calculations using Verlet integrating algorithm
+    function updateClothSimulation() {
+      // Direct fail-safe: clean up leaked mouse controller if mouse is not pressed
+      if (!mouseIsPressed) {
+        cleanupMouseControllers();
+      }
+
+      // Dynamic recreation of grabbed state to prevent different controllers from resetting/corrupting each other
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          points[c][r].grabbed = false;
+        }
+      }
+      for (let ctrl of controllers) {
+        for (let gp of ctrl.grabbedPoints) {
+          gp.p.grabbed = true;
+        }
+      }
+
+      // Step A: Accumulate physical movements
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          let p = points[c][r];
+          
+          if (currentScenario === 2) {
+            if (isTorn) {
+              // Once fully torn/ruptured, only the extreme left/right margins remain pinned to anchor the film
+              p.pinned = (p.col === 0 || p.col === cols - 1);
+            } else if (tearProgress > 0) {
+              // During progressive rip, unpin the top/bottom edges of severed rows to let them part and snap apart
+              if (isRowSevered(p.row)) {
+                if (p.col !== 0 && p.col !== cols - 1) {
+                  p.pinned = false;
+                }
+              }
+            }
+          }
+
+          if (p.pinned) {
+            p.x = p.origX;
+            p.y = p.origY;
+            continue;
+          }
+
+          let vx = (p.x - p.px) * friction;
+          let vy = (p.y - p.py) * friction;
+
+          // Apply Gravity force
+          vy += gravity;
+
+          // Light Breeze noise waveform
+          let timeScalar = millis() * 0.0016;
+          let breezeFreq = 0.012;
+          let breezeAmp = 0.35;
+          let breezeX = (noise(p.origX * breezeFreq, p.origY * breezeFreq, timeScalar) - 0.5) * breezeAmp;
+          let breezeY = (noise(p.origX * breezeFreq + 50, p.origY * breezeFreq + 50, timeScalar) - 0.5) * (breezeAmp * 0.25);
+
+          // Apply up throw decay values
+          if (liftPulse > 0.05) {
+            let depthGradient = 1.0 - (r / rows);
+            vy -= liftPulse * depthGradient * 0.45;
+          }
+
+          // Apply elastic snap / retraction force to pull and crumple cling wrap pieces to the lateral margins
+          if (currentScenario === 2 && isTorn) {
+            let midCol = Math.floor(cols / 2) - 1;
+            let colSpacing = clothWidth / (cols - 1);
+            let targetX;
+            if (p.col <= midCol) {
+              targetX = startX + p.col * (colSpacing * 0.12);
+            } else {
+              targetX = (startX + clothWidth) - (cols - 1 - p.col) * (colSpacing * 0.12);
+            }
+            let pullForceX = (targetX - p.x) * 0.085;
+            let pullForceY = (p.origY - p.y) * 0.055;
+            vx += pullForceX;
+            vy += pullForceY;
+          }
+
+          p.px = p.x;
+          p.py = p.y;
+          p.x += vx + breezeX;
+          p.y += vy + breezeY;
+        }
+      }
+
+      // Step B: Resolve manual/gestures lock anchors
+      applyGrabbedCoordinates();
+
+      // Step C: Iterate and correct rigid length structures
+      for (let iter = 0; iter < solverIterations; iter++) {
+        for (let stick of sticks) {
+          // Sever middle links dynamically based on tear progress or fully torn state
+          if (isStickSevered(stick)) {
+            continue;
+          }
+
+          let stickStiffness = stick.stiffness;
+          // Scale down stiffness of middle links dynamically and continuously as they rip apart
+          if (currentScenario === 2 && stick.isMiddleLink) {
+            let r1 = stick.p1.row;
+            let r2 = stick.p2.row;
+            let r = Math.floor((r1 + r2) / 2);
+            let factor = getRowSeveredFactor(r);
+            stickStiffness *= (1.0 - factor);
+          }
+
+          if (stickStiffness <= 0.0) {
+            continue;
+          }
+
+          let dx = stick.p2.x - stick.p1.x;
+          let dy = stick.p2.y - stick.p1.y;
+          let distanceVal = Math.sqrt(dx * dx + dy * dy);
+          if (distanceVal === 0) continue;
+
+          // Cling wrap elastic crinkling physics on horizontal shrink
+          let targetLen = stick.targetLength;
+          if (currentScenario === 2 && isTorn) {
+            if (stick.p1.row === stick.p2.row) { // horizontal stick row-aligned
+              targetLen = stick.targetLength * 0.12;
+            }
+          }
+
+          let difference = targetLen - distanceVal;
+          let percent = (difference / distanceVal) * stickStiffness;
+          let offsetX = dx * percent;
+          let offsetY = dy * percent;
+
+          if (!stick.p1.pinned && !stick.p1.grabbed) {
+            stick.p1.x -= offsetX;
+            stick.p1.y -= offsetY;
+          }
+          if (!stick.p2.pinned && !stick.p2.grabbed) {
+            stick.p2.x += offsetX;
+            stick.p2.y += offsetY;
+          }
+        }
+        applyGrabbedCoordinates(); // re-verify locks to avoid stretching
+      }
+
+      // Step D: Decay throwing force factor
+      if (liftPulse > 0) {
+        liftPulse *= 0.985;
+        if (liftPulse < 0.02) liftPulse = 0;
+      }
+
+      // Step D-2: Simulated/Keyboard progressive tear animation ticks
+      if (currentScenario === 2 && simulatedTearActive && !isTorn) {
+        tearProgress += 0.015; // smooth opening speed (about 65 frames)
+        if (tearProgress >= 1.0) {
+          tearProgress = 1.0;
+          isTorn = true;
+          simulatedTearActive = false;
+          triggerTearExplosion();
+        }
+      }
+
+      // Step E: Scenario 2 Auto-Tear Check for Multi-Hands / Multi-Touch pulls
+      if (currentScenario === 2 && !isTorn) {
+        let pinchingCtrls = controllers.filter(c => {
+          if (c.id === 'mouse') return mouseIsPressed;
+          return c.isPinching;
+        });
+        
+        if (pinchingCtrls.length >= 2) {
+          let c1 = pinchingCtrls[0];
+          let c2 = pinchingCtrls[1];
+          let d = dist(c1.x, c1.y, c2.x, c2.y);
+          
+          if (!dualPinchActive) {
+            dualPinchActive = true;
+            initialPinchDist = d;
+          } else {
+            let pullDelta = d - initialPinchDist;
+            if (pullDelta > 10) {
+              let maxPull = Math.max(120, width * 0.16); // limit of pull distance for 100% split
+              let localProgress = constrain(pullDelta / maxPull, 0.0, 1.0);
+              if (localProgress > tearProgress) {
+                tearProgress = localProgress;
+              }
+              
+              if (tearProgress >= 1.0) {
+                isTorn = true;
+                triggerTearExplosion();
+              }
+            }
+          }
+        } else {
+          dualPinchActive = false;
+        }
+      }
+
+      // Step F: Fades out the cling wrap beautifully as it completely tears and collapses to the margins
+      if (currentScenario === 2) {
+        if (isTorn) {
+          filmAlpha = Math.max(0.0, filmAlpha - 0.02); // take ~1.6s to fade out completely
+        } else {
+          filmAlpha = 1.0;
+        }
+      } else {
+        filmAlpha = 1.0;
+      }
+    }
+
+    function applyGrabbedCoordinates() {
+      for (let ctrl of controllers) {
+        for (let gp of ctrl.grabbedPoints) {
+          gp.p.x = ctrl.x + gp.dx;
+          gp.p.y = ctrl.y + gp.dy;
+        }
+      }
+    }
+
+    // Render Bottom Layer
+    function drawWebcamBackground() {
+      if (systemStarted && rawCapture && rawCapture.width > 0) {
+        push();
+        resetMatrix();
+        
+        // Move origin to center of screen
+        translate(width / 2, height / 2);
+        
+        // Apply mirroring around center
+        if (isWebcamMirrored) {
+          scale(-1, 1);
+        }
+        
+        // Calculate coverage size
+        let camAspect = rawCapture.width / rawCapture.height;
+        let screenAspect = width / height;
+        let drawW, drawH;
+        if (screenAspect > camAspect) {
+          drawW = width;
+          drawH = width / camAspect;
+        } else {
+          drawH = height;
+          drawW = height * camAspect;
+        }
+        
+        // Slightly dim camera input to create dramatic contrast
+        tint(140);
+        // Centered around the origin
+        image(rawCapture, -drawW / 2, -drawH / 2, drawW, drawH);
+        pop();
+      }
+    }
+
+    // Render Middle Layer background media card
+    function drawMiddleMedia(insideClip = false) {
+      // Boundaries of resting location size
+      let tgtW = clothWidth;
+      let tgtH = clothHeight;
+      let cX = width / 2;
+      let cY = (startY * 2 + clothHeight) / 2;
+
+      let hasMedia = uploadedImage || uploadedVideo;
+
+      if (!hasMedia) {
+        if (insideClip) return; // do not paint dark template card inside transparent shroud
+        
+        push();
+        rectMode(CENTER);
+        fill(20, 24, 33, 190);
+        stroke(255, 255, 255, 12);
+        strokeWeight(1.5);
+        rect(cX, cY, tgtW, tgtH, 16);
+
+        noStroke();
+        fill(255, 255, 255, 160);
+        textSize(Math.min(width * 0.04, 20));
+        textAlign(CENTER, CENTER);
+        text("📂 导入背景媒体", cX, cY - 24);
+
+        fill(255, 255, 255, 100);
+        textSize(12);
+        text("点击右下角或拖入您自己选择的图片或视频文件\n手势(拇指和食指捏合)或鼠标拖拽掀起透明物理幕布", cX, cY + 28);
+        pop();
+        return;
+      }
+
+      let activeSource = uploadedImage || uploadedVideo;
+      if (activeSource) {
+        push();
+        imageMode(CENTER);
+        let srcAspect = activeSource.width / activeSource.height;
+        let drawW = tgtW;
+        let drawH = tgtW / srcAspect;
+        if (drawH < tgtH) {
+          drawH = tgtH;
+          drawW = tgtH * srcAspect;
+        }
+        
+        // Draw the background media centered
+        image(activeSource, cX, cY, drawW, drawH);
+        pop();
+      }
+    }
+
+    // Draw Transparent Shroud curtain using masking clip boundary
+    function drawTransparentCurtain() {
+      // Guard: If film is completely torn and has faded out, don't draw any film at all!
+      if (currentScenario === 2 && isTorn && filmAlpha <= 0.0) {
+        return;
+      }
+
+      let ctx = drawingContext;
+      let midCol = Math.floor(cols / 2) - 1;
+
+      // Multiply the global drawing context alpha with our fading filmAlpha
+      let prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = prevAlpha * filmAlpha;
+
+      if (currentScenario === 2 && isTorn) {
+        // --- SCENARIO 2 FULLY TORN: Draw completely separated sheets ---
+        // 1. Draw Left Piece
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(points[0][0].x, points[0][0].y);
+        for (let c = 1; c <= midCol; c++) ctx.lineTo(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) ctx.lineTo(points[midCol][r].x, points[midCol][r].y);
+        for (let c = midCol - 1; c >= 0; c--) ctx.lineTo(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) ctx.lineTo(points[0][r].x, points[0][r].y);
+        ctx.closePath();
+        ctx.clip();
+        
+        drawCurtainRefractionAndHighlights();
+        ctx.restore();
+
+        // 2. Draw Right Piece
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(points[midCol + 1][0].x, points[midCol + 1][0].y);
+        for (let c = midCol + 2; c < cols; c++) ctx.lineTo(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) ctx.lineTo(points[cols - 1][r].x, points[cols - 1][r].y);
+        for (let c = cols - 2; c >= midCol + 1; c--) ctx.lineTo(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) ctx.lineTo(points[midCol + 1][r].x, points[midCol + 1][r].y);
+        ctx.closePath();
+        ctx.clip();
+        
+        drawCurtainRefractionAndHighlights();
+        ctx.restore();
+
+        // 3. Draw high-fidelity plastic tearing lines on fully severed lateral edges
+        stroke(255, 255, 255, lerp(70, 230, filmAlpha));
+        strokeWeight(1.8);
+        noFill();
+        
+        beginShape();
+        for (let r = 0; r < rows; r++) vertex(points[midCol][r].x, points[midCol][r].y);
+        endShape();
+
+        beginShape();
+        for (let r = 0; r < rows; r++) vertex(points[midCol + 1][r].x, points[midCol + 1][r].y);
+        endShape();
+
+      } else if (currentScenario === 2 && tearProgress >= 0.15) {
+        // --- PROGRESSIVE TEARING PHASE: Draw a single sheet with an inner dynamic HOLE ---
+        let firstR = -1;
+        let lastR = -1;
+        for (let r = 0; r < rows; r++) {
+          if (isRowSevered(r)) {
+            if (firstR === -1) firstR = r;
+            lastR = r;
+          }
+        }
+
+        ctx.save();
+        ctx.beginPath();
+        
+        // 1. Define Outer Path (Clockwise)
+        ctx.moveTo(points[0][0].x, points[0][0].y);
+        for (let c = 1; c < cols; c++) ctx.lineTo(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) ctx.lineTo(points[cols - 1][r].x, points[cols - 1][r].y);
+        for (let c = cols - 2; c >= 0; c--) ctx.lineTo(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) ctx.lineTo(points[0][r].x, points[0][r].y);
+        ctx.closePath();
+
+        // 2. Define Inner Path (Counter-Clockwise) if drawing a hole
+        if (firstR !== -1) {
+          ctx.moveTo(points[midCol][firstR].x, points[midCol][firstR].y);
+          for (let r = firstR + 1; r <= lastR; r++) {
+            ctx.lineTo(points[midCol][r].x, points[midCol][r].y);
+          }
+          ctx.lineTo(points[midCol + 1][lastR].x, points[midCol + 1][lastR].y);
+          for (let r = lastR - 1; r >= firstR; r--) {
+            ctx.lineTo(points[midCol + 1][r].x, points[midCol + 1][r].y);
+          }
+          ctx.closePath();
+        }
+
+        // Use 'evenodd' rule to clip and subtract the hole shape from the outer curtain
+        ctx.clip('evenodd');
+        
+        drawCurtainRefractionAndHighlights();
+        ctx.restore();
+
+        // 3. Draw high-fidelity neon-like plastic tearing lines & glow on the organic inner torn/severed edges!
+        if (firstR !== -1) {
+          stroke(255, 255, 255, lerp(120, 240, tearProgress));
+          strokeWeight(lerp(1.5, 3.5, tearProgress));
+          noFill();
+          
+          beginShape();
+          for (let r = firstR; r <= lastR; r++) {
+            vertex(points[midCol][r].x, points[midCol][r].y);
+          }
+          for (let r = lastR; r >= firstR; r--) {
+            vertex(points[midCol + 1][r].x, points[midCol + 1][r].y);
+          }
+          endShape(CLOSE);
+        }
+
+      } else {
+        // --- SCENARIO 1 OR UNTORN SCENARIO 2 (Pristine state): Standard undivided shape ---
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(points[0][0].x, points[0][0].y);
+        for (let c = 1; c < cols; c++) ctx.lineTo(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) ctx.lineTo(points[cols - 1][r].x, points[cols - 1][r].y);
+        for (let c = cols - 2; c >= 0; c--) ctx.lineTo(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) ctx.lineTo(points[0][r].x, points[0][r].y);
+        ctx.closePath();
+        ctx.clip();
+        
+        drawCurtainRefractionAndHighlights();
+        ctx.restore();
+      }
+
+      // ---- 4. Clear curtain borders & folds ----
+      noFill();
+      stroke(255, 255, 255, currentScenario === 2 ? 80 : 95);
+      strokeWeight(currentScenario === 2 ? 1.0 : 1.8);
+      
+      if (currentScenario === 2 && isTorn) {
+        // Draw Left Piece boundary
+        beginShape();
+        for (let c = 0; c <= midCol; c++) vertex(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) vertex(points[midCol][r].x, points[midCol][r].y);
+        for (let c = midCol - 1; c >= 0; c--) vertex(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) vertex(points[0][r].x, points[0][r].y);
+        endShape(CLOSE);
+
+        // Draw Right Piece boundary
+        beginShape();
+        for (let c = midCol + 1; c < cols; c++) vertex(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) vertex(points[cols - 1][r].x, points[cols - 1][r].y);
+        for (let c = cols - 2; c >= midCol + 1; c--) vertex(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) vertex(points[midCol + 1][r].x, points[midCol + 1][r].y);
+        endShape(CLOSE);
+        
+      } else if (currentScenario === 2 && tearProgress >= 0.15) {
+        let firstR = -1;
+        let lastR = -1;
+        for (let r = 0; r < rows; r++) {
+          if (isRowSevered(r)) {
+            if (firstR === -1) firstR = r;
+            lastR = r;
+          }
+        }
+
+        // Draw the main outer boundary of the entire sheet (no center separation split if not torn)
+        beginShape();
+        for (let c = 0; c < cols; c++) vertex(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) vertex(points[cols - 1][r].x, points[cols - 1][r].y);
+        for (let c = cols - 2; c >= 0; c--) vertex(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) vertex(points[0][r].x, points[0][r].y);
+        endShape(CLOSE);
+        
+        // Draw some torn stretch lines near the tear to make it look like pulled plastic wrap
+        if (firstR !== -1) {
+          stroke(255, 255, 255, lerp(40, 95, tearProgress));
+          strokeWeight(lerp(0.8, 1.8, tearProgress));
+          // Left piece details
+          for (let r = firstR + 1; r < lastR - 1; r += 3) {
+            line(points[midCol][r].x, points[midCol][r].y, points[midCol - 2][r].x - (tearProgress * 15), points[midCol - 2][r].y);
+          }
+          // Right piece details
+          for (let r = firstR + 1; r < lastR - 1; r += 3) {
+            line(points[midCol + 1][r].x, points[midCol + 1][r].y, points[midCol + 3][r].x + (tearProgress * 15), points[midCol + 3][r].y);
+          }
+        }
+      } else {
+        // Standard full curtain border
+        beginShape();
+        for (let c = 0; c < cols; c++) vertex(points[c][0].x, points[c][0].y);
+        for (let r = 1; r < rows; r++) vertex(points[cols - 1][r].x, points[cols - 1][r].y);
+        for (let c = cols - 2; c >= 0; c--) vertex(points[c][rows - 1].x, points[c][rows - 1].y);
+        for (let r = rows - 2; r >= 0; r--) vertex(points[0][r].x, points[0][r].y);
+        endShape(CLOSE);
+      }
+
+      if (currentScenario === 1) {
+        // Organic folding/drape curves running down designated columns
+        stroke(255, 255, 255, 34); // silky white crease line
+        strokeWeight(1.6);
+        let foldIndices = [
+          Math.floor(cols * 0.16),
+          Math.floor(cols * 0.34),
+          Math.floor(cols * 0.50),
+          Math.floor(cols * 0.66),
+          Math.floor(cols * 0.84)
+        ];
+        for (let fCol of foldIndices) {
+          if (fCol >= cols) continue;
+          beginShape();
+          let pStart = points[fCol][0];
+          curveVertex(pStart.x, pStart.y);
+          for (let r = 0; r < rows; r++) {
+            let p = points[fCol][r];
+            curveVertex(p.x, p.y);
+          }
+          let pEnd = points[fCol][rows - 1];
+          curveVertex(pEnd.x, pEnd.y);
+          endShape();
+        }
+
+        // Horizontal wave structures
+        stroke(255, 255, 255, 14);
+        let horizontalFoldIndices = [Math.floor(rows * 0.32), Math.floor(rows * 0.65)];
+        for (let fRow of horizontalFoldIndices) {
+          beginShape();
+          let pStart = points[0][fRow];
+          curveVertex(pStart.x, pStart.y);
+          for (let c = 0; c < cols; c++) {
+            let p = points[c][fRow];
+            curveVertex(p.x, p.y);
+          }
+          let pEnd = points[cols - 1][fRow];
+          curveVertex(pEnd.x, pEnd.y);
+          endShape();
+        }
+      } else {
+        // --- SCENARIO 2: NATURAL WRINKLES & WAVY CREASING REFLECTIONS ---
+        // Instead of straight rigid line indicators, we draw thin, subtle wavy creases tracing mesh vertices. This bends tactilely as the mesh stretches!
+        noFill();
+        strokeWeight(1.0);
+        
+        let drawWavyCrease = (pathFunc, opacity) => {
+          stroke(255, 255, 255, opacity * filmAlpha);
+          beginShape();
+          let path = pathFunc();
+          if (path.length < 3) return;
+          
+          // Start anchoring curveVertex
+          curveVertex(path[0].x, path[0].y);
+          for (let p of path) {
+            // Add tiny, subtle high-frequency wriggle based on Perlin noise for organic hand-made micro-crease feel
+            let nVal = noise(p.x * 0.05, p.y * 0.05, frameCount * 0.01) - 0.5;
+            curveVertex(p.x + nVal * 3, p.y + nVal * 3);
+          }
+          curveVertex(path[path.length - 1].x, path[path.length - 1].y);
+          endShape();
+        };
+
+        if (!isTorn) {
+          // Crease 1: Soft diagonal sweep from upper-left to lower-center
+          drawWavyCrease(() => {
+            let pts = [];
+            for (let r = 2; r < rows - 2; r++) {
+              let c = Math.floor(map(r, 2, rows - 3, 2, midCol));
+              if (points[c] && points[c][r]) pts.push(points[c][r]);
+            }
+            return pts;
+          }, 32);
+
+          // Crease 2: Soft diagonal sweep from upper-right to lower-center
+          drawWavyCrease(() => {
+            let pts = [];
+            for (let r = 2; r < rows - 2; r++) {
+              let c = Math.floor(map(r, 2, rows - 3, cols - 3, midCol + 1));
+              if (points[c] && points[c][r]) pts.push(points[c][r]);
+            }
+            return pts;
+          }, 24);
+
+          // Crease 3: A couple of vertical pressure folds near the center pinning
+          drawWavyCrease(() => {
+            let pts = [];
+            for (let r = 1; r < rows - 1; r++) {
+              let c = midCol - 1;
+              if (points[c] && points[c][r]) pts.push(points[c][r]);
+            }
+            return pts;
+          }, 18);
+          
+          drawWavyCrease(() => {
+            let pts = [];
+            for (let r = 1; r < rows - 1; r++) {
+              let c = midCol + 2;
+              if (points[c] && points[c][r]) pts.push(points[c][r]);
+            }
+            return pts;
+          }, 18);
+        } else {
+          // If torn, separate remaining pieces have some leftover crinkled tension creases
+          // Left piece creases
+          drawWavyCrease(() => {
+            let pts = [];
+            for (let r = 1; r < rows - 1; r++) {
+              let c = Math.floor(map(r, 1, rows - 2, 1, midCol - 2));
+              if (points[c] && points[c][r]) pts.push(points[c][r]);
+            }
+            return pts;
+          }, 25);
+
+          // Right piece creases
+          drawWavyCrease(() => {
+            let pts = [];
+            for (let r = 1; r < rows - 1; r++) {
+              let c = Math.floor(map(r, 1, rows - 2, cols - 2, midCol + 3));
+              if (points[c] && points[c][r]) pts.push(points[c][r]);
+            }
+            return pts;
+          }, 22);
+        }
+      }
+
+      // Draw dynamic physical deformation stress-whitening spots directly on stretched film vertices
+      if (currentScenario === 2) {
+        for (let c = 0; c < cols; c++) {
+          for (let r = 0; r < rows; r++) {
+            let p = points[c][r];
+            let d = dist(p.x, p.y, p.origX, p.origY);
+            if (d > 6) {
+              let intensity = map(constrain(d, 6, 75), 6, 75, 10, 150);
+              let rGlow = map(constrain(d, 6, 75), 6, 75, 12, 55);
+              
+              push();
+              resetMatrix();
+              let grad = ctx.createRadialGradient(p.x, p.y, 1, p.x, p.y, rGlow);
+              grad.addColorStop(0, `rgba(255, 255, 255, ${intensity / 255})`);
+              grad.addColorStop(0.4, `rgba(240, 248, 255, ${(intensity * 0.4) / 255})`);
+              grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+              ctx.fillStyle = grad;
+              noStroke();
+              circle(p.x, p.y, rGlow * 2);
+              pop();
+            }
+          }
+        }
+      }
+
+      // Restore original alpha
+      ctx.globalAlpha = prevAlpha;
+    }
+
+    // Helper to draw inside-clip refraction background and shiny highlights
+    function drawCurtainRefractionAndHighlights() {
+      let ctx = drawingContext;
+      let midCol = Math.floor(cols / 2) - 1;
+      // ---- 1. Glass camouflage refraction effect ----
+      if (rawCapture && rawCapture.width > 0) {
+        push();
+        resetMatrix();
+        
+        // Move origin to center of screen
+        translate(width / 2, height / 2);
+        
+        // Apply mirroring around center
+        if (isWebcamMirrored) {
+          scale(-1, 1);
+        }
+        
+        // Zoom and offset camera feed to simulate refraction (stronger for Scenario 1, subtle for Scenario 2)
+        if (currentScenario === 1) {
+          scale(1.04);
+          let swayOffsetX = sin(frameCount * 0.02) * 8;
+          let swayOffsetY = cos(frameCount * 0.02) * 5;
+          translate(swayOffsetX, swayOffsetY);
+        } else {
+          // Cling wrap has high tension, less physical refraction
+          scale(1.015);
+          let swayOffsetX = sin(frameCount * 0.04) * 2;
+          let swayOffsetY = cos(frameCount * 0.04) * 2;
+          translate(swayOffsetX, swayOffsetY);
+        }
+        
+        let camAspect = rawCapture.width / rawCapture.height;
+        let screenAspect = width / height;
+        let drawW, drawH;
+        if (screenAspect > camAspect) {
+          drawW = width;
+          drawH = width / camAspect;
+        } else {
+          drawH = height;
+          drawW = height * camAspect;
+        }
+        
+        tint(255, 255); // Opaque camera feed on the film
+        image(rawCapture, -drawW / 2, -drawH / 2, drawW, drawH);
+        pop();
+      }
+
+      // ---- 2. Light veil covering/shading layer ----
+      noStroke();
+      if (currentScenario === 1) {
+        fill(255, 255, 255, 12);
+        rect(0, 0, width, height);
+      } else {
+        // Plastic cling wrap has high gloss and some bluish/purplish cold sheen
+        fill(240, 248, 255, 16);
+        rect(0, 0, width, height);
+      }
+
+      // ---- 3. Sliding / Ambient glossy highlights ----
+      if (currentScenario === 1) {
+        let slidingGradY = (frameCount * 2.5) % (height * 2.5) - height;
+        let sheenGrad = ctx.createLinearGradient(0, slidingGradY, width, slidingGradY + height * 0.4);
+        sheenGrad.addColorStop(0.00, 'rgba(255, 255, 255, 0.00)');
+        sheenGrad.addColorStop(0.48, 'rgba(255, 255, 255, 0.00)');
+        sheenGrad.addColorStop(0.50, 'rgba(255, 255, 255, 0.22)');
+        sheenGrad.addColorStop(0.52, 'rgba(255, 255, 255, 0.00)');
+        sheenGrad.addColorStop(1.00, 'rgba(255, 255, 255, 0.00)');
+        ctx.fillStyle = sheenGrad;
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        // --- SCENARIO 2 (CLING WRAP) NATURAL IRREGULAR GLARE REFLECTION ---
+        // Instead of sliding light lines, we render 3 soft, organic window/ambient glares.
+        // These warp dynamically based on the coordinates of actual physical mesh points!
+        
+        let drawOrganicGlare = (gridCStart, gridCEnd, gridRStart, gridREnd, baseRadius, opacity, seed) => {
+          let sumX = 0, sumY = 0, count = 0;
+          for (let c = gridCStart; c <= gridCEnd; c++) {
+            for (let r = gridRStart; r <= gridREnd; r++) {
+              if (points[c] && points[c][r]) {
+                sumX += points[c][r].x;
+                sumY += points[c][r].y;
+                count++;
+              }
+            }
+          }
+          if (count === 0) return;
+          let cx = sumX / count;
+          let cy = sumY / count;
+          
+          ctx.save();
+          let grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, baseRadius);
+          grad.addColorStop(0, `rgba(255, 255, 255, ${opacity})`);
+          grad.addColorStop(0.35, `rgba(240, 248, 255, ${opacity * 0.75})`);
+          grad.addColorStop(0.7, `rgba(240, 248, 255, ${opacity * 0.2})`);
+          grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          ctx.fillStyle = grad;
+          
+          // Draw irregular noise-modulated boundary to simulate light refracting off uneven plastic wrapping
+          beginShape();
+          let numVerts = 18;
+          for (let i = 0; i < numVerts + 3; i++) {
+            let angle = map(i % numVerts, 0, numVerts, 0, TWO_PI);
+            // Uses sine/cosine coordinates to generate looping Perlin noise
+            let nSeedX = cos(angle) * 1.5 + seed;
+            let nSeedY = sin(angle) * 1.5 + seed + frameCount * 0.006;
+            let nVal = noise(nSeedX, nSeedY);
+            
+            // Modulate the radius irregularly based on noise
+            let rLocal = baseRadius * (0.65 + nVal * 0.7);
+            let px = cx + cos(angle) * rLocal;
+            let py = cy + sin(angle) * rLocal;
+            
+            curveVertex(px, py);
+          }
+          endShape(CLOSE);
+          ctx.restore();
+        };
+
+        if (!isTorn) {
+          // 1. Upper-left soft ambient window reflection
+          drawOrganicGlare(2, 6, 2, 6, 130, 0.16, 100.0);
+          
+          // 2. Middle-right ceiling soft bulb reflection
+          drawOrganicGlare(cols - 8, cols - 3, 3, 8, 95, 0.14, 200.0);
+          
+          // 3. Center-top subtle horizontal soft glaze
+          drawOrganicGlare(midCol - 3, midCol + 3, 0, 4, 150, 0.11, 300.0);
+        } else {
+          // If torn, we gently fade out the glares on the separate sheets
+          let leftAlpha = 0.16 * filmAlpha;
+          let rightAlpha = 0.14 * filmAlpha;
+          
+          if (leftAlpha > 0.01) {
+            drawOrganicGlare(1, Math.min(midCol - 1, 5), 2, 6, 110, leftAlpha, 100.0);
+          }
+          if (rightAlpha > 0.01) {
+            drawOrganicGlare(Math.max(midCol + 2, cols - 7), cols - 2, 3, 8, 85, rightAlpha, 200.0);
+          }
+        }
+      }
+    }
+
+    // Handles interactive pointers overlay feedback
+    function drawActiveCursors() {
+      if (!showUI) return;
+      
+      // Draw stress whitening glow for Scenario 2 under physical tension/deformation
+      if (currentScenario === 2 && filmAlpha > 0.1) {
+        for (let ctrl of controllers) {
+          if ((ctrl.id === 'mouse' && mouseIsPressed) || ctrl.isPinching) {
+            let startX = ctrl.pinchStartX || ctrl.x;
+            let startY = ctrl.pinchStartY || ctrl.y;
+            let pullDist = dist(ctrl.x, ctrl.y, startX, startY);
+            if (pullDist > 10) {
+              let glowRadius = map(constrain(pullDist, 10, 160), 10, 160, 35, 120);
+              let opacity = map(constrain(pullDist, 10, 160), 10, 160, 40, 220);
+              
+              push();
+              resetMatrix();
+              // Create canvas radial gradient for foggy stress whiteness
+              let grad = drawingContext.createRadialGradient(
+                ctrl.x, ctrl.y, 4,
+                ctrl.x, ctrl.y, glowRadius
+              );
+              grad.addColorStop(0, `rgba(255, 255, 255, ${opacity / 255})`);
+              grad.addColorStop(0.3, `rgba(240, 248, 255, ${(opacity * 0.5) / 255})`);
+              grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+              
+              drawingContext.fillStyle = grad;
+              noStroke();
+              circle(ctrl.x, ctrl.y, glowRadius * 2);
+              
+              // Draw stress deformation fanning rays
+              stroke(255, 255, 255, map(pullDist, 10, 160, 25, 140));
+              strokeWeight(map(pullDist, 10, 160, 0.8, 2.5));
+              let numRays = Math.floor(map(pullDist, 10, 160, 4, 12));
+              for (let i = 0; i < numRays; i++) {
+                let ang = map(i, 0, numRays, 0, TWO_PI) + (frameCount * 0.02);
+                let len = random(glowRadius * 0.4, glowRadius * 0.95);
+                let rx = ctrl.x + cos(ang) * len;
+                let ry = ctrl.y + sin(ang) * len;
+                line(ctrl.x, ctrl.y, rx, ry);
+              }
+              pop();
+            }
+          }
+        }
+      }
+
+      push();
+      resetMatrix();
+      for (let ctrl of controllers) {
+        if (ctrl.id === 'mouse' && !mouseIsPressed) continue;
+        
+        let isHand = ctrl.id.startsWith('hand_');
+        let x = ctrl.x;
+        let y = ctrl.y;
+
+        if (isHand) {
+          if (ctrl.isPinching) {
+            // Pulsating green grab ring
+            let pulseSize = sin(frameCount * 0.22) * 6 + 22;
+            noFill();
+            stroke(16, 185, 129, 180);
+            strokeWeight(2);
+            circle(x, y, pulseSize);
+            
+            fill(16, 185, 129, 210);
+            noStroke();
+            circle(x, y, 12);
+          } else {
+            // Semi transparent white hover circle
+            noFill();
+            stroke(255, 255, 255, 110);
+            strokeWeight(1.5);
+            drawingContext.setLineDash([4, 4]);
+            circle(x, y, 20);
+            drawingContext.setLineDash([]);
+            
+            fill(255, 255, 255, 160);
+            noStroke();
+            circle(x, y, 7);
+          }
+        } else {
+          // Blue neon cursor for mouse/touch interactions
+          let pulseSize = sin(frameCount * 0.24) * 5 + 16;
+          noFill();
+          stroke(56, 189, 248, 180);
+          strokeWeight(2);
+          circle(x, y, pulseSize);
+
+          fill(56, 189, 248, 210);
+          noStroke();
+          circle(x, y, 10);
+        }
+      }
+      pop();
+    }
+
+    // Displays helpful live telemetry data via DOM update sync
+    function drawHUDTelemetry() {
+      let pinchEl = document.getElementById('telemetry-pinch');
+      let distEl = document.getElementById('telemetry-dist');
+      let statusEl = document.getElementById('telemetry-status');
+      
+      let fillBarEl = document.getElementById('telemetry-bar-fill');
+      let intensityNumEl = document.getElementById('telemetry-intensity-num');
+      let tipEl = document.getElementById('telemetry-tip');
+      let dotEl = document.getElementById('telemetry-engine-dot');
+      let titleEl = document.getElementById('telemetry-engine-title');
+
+      let currentThresholds = getPinchThresholds();
+      let triggerPercent = Math.round((1.0 - currentThresholds.ratio) * 100);
+
+      // Dynamically reposition threshold line on the indicator bar
+      let markerEl = document.getElementById('telemetry-marker');
+      let limitLabelEl = document.getElementById('telemetry-limit-label');
+      if (markerEl) {
+        markerEl.style.left = triggerPercent + '%';
+        markerEl.title = `Pinch Trigger Point (${triggerPercent}%)`;
+      }
+      if (limitLabelEl) {
+        limitLabelEl.innerText = `Grab Limit (${triggerPercent}%)`;
+      }
+
+      // 1. Update MediaPipe Engine Init Dot & Title Indicators
+      if (dotEl && titleEl) {
+        if (isMediaPipeLoaded) {
+          if (dotEl.classList.contains('bg-amber-400')) {
+            dotEl.classList.remove('bg-amber-400');
+            dotEl.classList.add('bg-green-400');
+          }
+          titleEl.innerText = "M-Pipe Engine Ready";
+        } else {
+          if (!dotEl.classList.contains('bg-amber-400')) {
+            dotEl.classList.add('bg-amber-400 animate-pulse');
+          }
+          titleEl.innerText = "M-Pipe Engine Initializing";
+        }
+      }
+
+      let activeHandsArray = controllers.filter(c => c.id.startsWith('hand_'));
+      if (activeHandsArray.length > 0) {
+        let masterHand = activeHandsArray[0];
+        
+        // 2. Numerical Values
+        if (pinchEl) pinchEl.innerText = masterHand.pinchRatio.toFixed(3);
+        if (distEl) {
+          let distVal = masterHand.distNorm !== undefined ? masterHand.distNorm : (liftPulse / 10.0);
+          distEl.innerText = distVal.toFixed(3);
+        }
+
+        // 3. Status Badge and dynamic coloring
+        if (statusEl) {
+          if (masterHand.isPinching) {
+            statusEl.innerText = "GRABBED";
+            statusEl.className = "text-xs font-mono font-bold tracking-wide text-green-400 animate-pulse";
+          } else {
+            statusEl.innerText = "TRACKING";
+            statusEl.className = "text-xs font-mono font-semibold tracking-wide text-sky-400";
+          }
+        }
+
+        // 4. Slider Gauge Fill & Intensity
+        // Intensity goes up as fingers close (pinchRatio goes 1.0 -> 0.0)
+        let intensityVal = Math.max(0, Math.min(100, Math.round((1.0 - masterHand.pinchRatio) * 100)));
+        if (intensityNumEl) intensityNumEl.innerText = intensityVal + "%";
+        
+        if (fillBarEl) {
+          fillBarEl.style.width = intensityVal + '%';
+          // Color code according to hover, prepare or pinch status
+          if (masterHand.isPinching) {
+            fillBarEl.className = "h-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] rounded-full transition-all duration-75";
+          } else if (intensityVal >= triggerPercent) { // pinchRatio <= currentThresholds.ratio
+            fillBarEl.className = "h-full bg-amber-400 rounded-full transition-all duration-75";
+          } else {
+            fillBarEl.className = "h-full bg-white/40 rounded-full transition-all duration-75";
+          }
+        }
+
+        // 5. Context Help Tips
+        if (tipEl) {
+          if (currentScenario === 2) {
+            if (isTorn) {
+              tipEl.innerHTML = `<span class="text-emerald-400">⚡</span> <span><strong>保鲜膜已撕开并完全化解！</strong> 完整背景媒体画面已显示。点击<strong>一键归位</strong>重置并贴上新的保鲜膜。</span>`;
+            } else if (simulatedTearActive) {
+              tipEl.innerHTML = `<span class="text-amber-400">⚡</span> <span><strong>保鲜膜撕扯中... ${Math.round(tearProgress * 100)}%</strong> 看着中缝线条撕开，露出后面的美妙内容！</span>`;
+            } else if (tearProgress > 0) {
+              tipEl.innerHTML = `<span class="text-amber-400">👐</span> <span><strong>双手撕裂中 (撕裂进度: ${Math.round(tearProgress * 100)}%)！</strong> 继续用力朝两侧拉开，即可彻底撕裂薄膜！</span>`;
+            } else if (masterHand.isPinching) {
+              let pinchingCtrls = controllers.filter(c => c.id === 'mouse' ? mouseIsPressed : c.isPinching);
+              if (pinchingCtrls.length >= 2) {
+                tipEl.innerHTML = `<span class="text-amber-400">👐</span> <span><strong>双手已捏紧保鲜膜！</strong> 现在请<strong>向两侧拉扯</strong>，膜会根据您的物理扯力开始<strong>裂开、拉伸形变并最终彻底撕干净</strong>！</span>`;
+              } else {
+                tipEl.innerHTML = `<span class="text-sky-300">👋</span> <span><strong>已单手捏拢拉扯！</strong> 您看，膜表面产生了<strong>拉伸形变和压力白斑</strong>。保鲜膜需要<strong>双手捏合并朝两边拽</strong>才能中缝崩解。双击或点击右下角键模拟。</span>`;
+              }
+            } else {
+              tipEl.innerHTML = `<span class="text-indigo-400">💡</span> <span><strong>保鲜膜玩法：</strong> 伸出双手并捏在一起，<strong>往两侧拉拽</strong>即可撕裂保鲜膜！可双击画面或点击右下角快速模拟撕膜！</span>`;
+            }
+          } else {
+            // Scenario 1 Tips
+            if (masterHand.isPinching) {
+              tipEl.innerHTML = `<span class="text-green-400">✨</span> <span><strong>已捏合抓取！</strong> 拖动手指即可拉扯透明液态幕布。上抛空气释放可飞天，下甩释放则坠落！</span>`;
+            } else if (intensityVal >= Math.max(25, triggerPercent - 12)) { // approaching grab point
+              tipEl.innerHTML = `<span class="text-amber-400">🤏</span> <span><strong>手指快捏合啦！</strong> 再稍微贴紧一点，达到 <strong>${triggerPercent}%</strong> 就能自动抓起幕布。</span>`;
+            } else {
+              tipEl.innerHTML = `<span class="text-sky-400">👋</span> <span><strong>手势已捕捉。</strong> 试着伸出大拇指 and 食指并<strong>捏合(Pinch)</strong>。可在右下角调节灵敏度。</span>`;
+            }
+          }
+        }
+
+      } else {
+        // No hands tracked currently
+        if (pinchEl) pinchEl.innerText = "0.000";
+        if (distEl) {
+          distEl.innerText = (liftPulse / 10.0).toFixed(3);
+        }
+        if (statusEl) {
+          statusEl.innerText = "FREE";
+          statusEl.className = "text-xs font-mono font-semibold tracking-wide text-white/30";
+        }
+        if (intensityNumEl) intensityNumEl.innerText = "0%";
+        if (fillBarEl) {
+          fillBarEl.style.width = '0%';
+          fillBarEl.className = "h-full bg-white/40 rounded-full transition-all duration-75";
+        }
+
+        // Context Tips for setup issues
+        if (tipEl) {
+          if (!isMediaPipeLoaded) {
+            tipEl.innerHTML = `<span class="text-amber-400">⏳</span> <span><strong>正在加载 AI 模型文件...</strong> 首次启用会从 CDN 加载约 5MB 的手势识别模型，根据网络加载。请等待。</span>`;
+          } else if (!isCameraActive) {
+            tipEl.innerHTML = `<span class="text-rose-400">📷</span> <span><strong>等待摄像头就绪...</strong> 请确保您已在浏览器中允许本应用的摄像头访问权限。</span>`;
+          } else {
+            if (currentScenario === 1) {
+              tipEl.innerHTML = `<span class="text-indigo-300">💡</span> <span><strong>电视幕布手势已锁定！</strong> 抬起单手对准镜头，食指和大拇指捏拢即可抓起和掀开电视幕布。</span>`;
+            } else {
+              if (isTorn) {
+                tipEl.innerHTML = `<span class="text-emerald-400">⚡</span> <span><strong>保鲜膜已完全崩裂并滑退！</strong> 点击左侧<strong>‘一键归位’</strong>可以拉开一条全新紧致的透明保鲜膜，重新体验双手物理阻裂！</span>`;
+              } else if (tearProgress > 0) {
+                tipEl.innerHTML = `<span class="text-amber-400">👐</span> <span><strong>已撕开一部分 (${Math.round(tearProgress * 100)}%)！</strong> 再次用双手捏紧拉伸可以继续中缝，双击画圈或点击右下角可完美撕净！</span>`;
+              } else {
+                tipEl.innerHTML = `<span class="text-indigo-300">⚡</span> <span><strong>物理保鲜膜手势就绪！</strong> 伸出双手，双手手指各自捏在一起，向<strong>两侧拉拽</strong>即可发生保鲜膜撕开！双击或点击右下角可完美体验物理级拟真撕破！</span>`;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Grabs candidate point structures around touch controllers
+    function lockCurtainPoints(ctrl) {
+      let candidateList = [];
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          let p = points[c][r];
+          let d = dist(ctrl.x, ctrl.y, p.x, p.y);
+          if (d < 160) {
+            candidateList.push({ p: p, distance: d });
+          }
+        }
+      }
+
+      // Limit grabbed points to 35 max to avoid heavy block freezing
+      candidateList.sort((a, b) => a.distance - b.distance);
+      let grabCap = Math.min(candidateList.length, 35);
+      
+      ctrl.grabbedPoints = [];
+      for (let i = 0; i < grabCap; i++) {
+        let p = candidateList[i].p;
+        p.grabbed = true;
+        ctrl.grabbedPoints.push({
+          p: p,
+          dx: p.x - ctrl.x,
+          dy: p.y - ctrl.y
+        });
+      }
+    }
+
+    function unlockCurtainPoints(ctrl) {
+      for (let gp of ctrl.grabbedPoints) {
+        gp.p.grabbed = false;
+      }
+      ctrl.grabbedPoints = [];
+    }
+
+    function cleanupMouseControllers() {
+      for (let i = controllers.length - 1; i >= 0; i--) {
+        if (controllers[i].id === 'mouse') {
+          unlockCurtainPoints(controllers[i]);
+          controllers.splice(i, 1);
+        }
+      }
+    }
+
+    // Triggered kinematics throws
+    function triggerUpwardThrow() {
+      liftPulse = 32.0; // High decay impulse factor
+      for (let c = 0; c < cols; c++) {
+        for (let r = 1; r < rows; r++) {
+          let p = points[c][r];
+          let depthFactor = (rows - r) / rows;
+          p.py = p.y + random(10, 24) * depthFactor; // inject upward velocity vectors
+        }
+      }
+    }
+
+    function triggerDownwardDrop() {
+      liftPulse = 0.0; // Instantly kill upward pulse
+      for (let c = 0; c < cols; c++) {
+        for (let r = 1; r < rows; r++) {
+          let p = points[c][r];
+          let depthFactor = r / rows;
+          p.py = p.y - random(8, 18) * depthFactor; // push down
+        }
+      }
+    }
+
+    // Manual/Fallback UI Cursors mouse controller mappings
+    function mousePressed() {
+      if (!systemStarted) return;
+      // Prevent grabs outside UI elements
+      if (mouseX < 0 || mouseX > width || mouseY < 0 || mouseY > height) return;
+      if (mouseY > height - 80 && mouseX < 450) return; // avoid blocking toolbars
+      
+      // Clean up duplicates
+      cleanupMouseControllers();
+      
+      let mc = {
+        id: 'mouse',
+        active: true,
+        x: mouseX,
+        y: mouseY,
+        px: mouseX,
+        py: mouseY,
+        vy: 0.0,
+        grabbedPoints: []
+      };
+      
+      lockCurtainPoints(mc);
+      controllers.push(mc);
+    }
+
+    function mouseDragged() {
+      if (!systemStarted) return;
+      let mc = controllers.find(c => c.id === 'mouse');
+      if (mc) {
+        mc.px = mc.x;
+        mc.py = mc.y;
+        mc.x = mouseX;
+        mc.y = mouseY;
+        mc.vy = 0.75 * mc.vy + 0.25 * (mc.y - mc.py); // smoothed rolling velocity
+      }
+    }
+
+    function mouseReleased() {
+      if (!systemStarted) return;
+      let idx = controllers.findIndex(c => c.id === 'mouse');
+      if (idx !== -1) {
+        let mc = controllers[idx];
+        unlockCurtainPoints(mc);
+        
+        let vyReleased = mc.vy;
+        if (vyReleased < -15) {
+          triggerUpwardThrow();
+        } else if (vyReleased > 15) {
+          triggerDownwardDrop();
+        }
+      }
+      cleanupMouseControllers();
+    }
+
+    // Prevent mobile scrolling & drag behaviors globally
+    function touchStarted() {
+      mousePressed();
+      return false;
+    }
+    function touchMoved() {
+      mouseDragged();
+      return false;
+    }
+    function touchEnded() {
+      mouseReleased();
+      return false;
+    }
+
+    // MediaPipe Hands multi-points processing
+    function processHandDetections(multiLandmarks) {
+      let detectedList = [];
+
+      if (multiLandmarks) {
+        for (let landmarks of multiLandmarks) {
+          // Calculate finger coordinates
+          let l4 = getPixelCoordsFromMP(landmarks[4]);   // Thumb tip
+          let l8 = getPixelCoordsFromMP(landmarks[8]);   // Index tip
+          let l12 = getPixelCoordsFromMP(landmarks[12]); // Middle tip
+          let l0 = getPixelCoordsFromMP(landmarks[0]);   // Wrist
+          let l9 = getPixelCoordsFromMP(landmarks[9]);   // Middle knuckletip
+
+          let cX = (l4.x + l8.x) / 2;
+          let cY = (l4.y + l8.y) / 2;
+
+          // Support both index-finger and middle-finger pinching for extra reliability
+          let thumbIndexDistance = dist(l4.x, l4.y, l8.x, l8.y);
+          let thumbMiddleDistance = dist(l4.x, l4.y, l12.x, l12.y);
+          let minDistance = Math.min(thumbIndexDistance, thumbMiddleDistance);
+
+          let palmSpan = dist(l0.x, l0.y, l9.x, l9.y);
+          if (palmSpan === 0) palmSpan = 1;
+
+          let pinchRatio = minDistance / palmSpan;
+          // Normalized distance estimation for diagnostics (using minimum distance normalized)
+          let distNorm = minDistance / (width || 640);
+
+          detectedList.push({
+            x: cX,
+            y: cY,
+            pinchRatio: pinchRatio,
+            distNorm: distNorm
+          });
+        }
+      }
+
+      // Match tracked hand controllers list frame-to-frame (N<=2)
+      let handControllers = controllers.filter(c => c.id.startsWith('hand_'));
+      let matchedCreatedIdx = new Set();
+      let matchedControlsIdx = new Set();
+
+      let possiblePairs = [];
+      for (let i = 0; i < detectedList.length; i++) {
+        for (let j = 0; j < handControllers.length; j++) {
+          let distanceDelta = dist(detectedList[i].x, detectedList[i].y, handControllers[j].x, handControllers[j].y);
+          if (distanceDelta < 200) {
+            possiblePairs.push({ detIdx: i, ctrlIdx: j, d: distanceDelta });
+          }
+        }
+      }
+
+      possiblePairs.sort((a,b) => a.d - b.d);
+
+      for (let pair of possiblePairs) {
+        if (!matchedCreatedIdx.has(pair.detIdx) && !matchedControlsIdx.has(pair.ctrlIdx)) {
+          matchedCreatedIdx.add(pair.detIdx);
+          matchedControlsIdx.add(pair.ctrlIdx);
+
+          let ctrl = handControllers[pair.ctrlIdx];
+          let det = detectedList[pair.detIdx];
+
+          ctrl.px = ctrl.x;
+          ctrl.py = ctrl.y;
+          ctrl.x = det.x;
+          ctrl.y = det.y;
+          ctrl.vy = 0.70 * ctrl.vy + 0.30 * (ctrl.y - ctrl.py);
+          ctrl.pinchRatio = det.pinchRatio;
+          ctrl.distNorm = det.distNorm;
+
+          // Robust, scale-invariant hysteresis pinching toggles
+          let wasPinching = ctrl.isPinching;
+          let isPinching = wasPinching;
+          let currentThresholds = getPinchThresholds();
+
+          if (!wasPinching) {
+            // Enhanced tracking: Trigger pinch if pinchRatio is under ratio threshold or normalized distance is under dist threshold
+            if (det.pinchRatio < currentThresholds.ratio || det.distNorm < currentThresholds.dist) {
+              isPinching = true;
+            }
+          } else {
+            // More forgiving release: Let go if pinchRatio goes above release threshold
+            if (det.pinchRatio > currentThresholds.release) {
+              isPinching = false;
+            }
+          }
+
+          ctrl.isPinching = isPinching;
+
+          if (isPinching && !wasPinching) {
+            lockCurtainPoints(ctrl);
+          } else if (!isPinching && wasPinching) {
+            unlockCurtainPoints(ctrl);
+            if (ctrl.vy < -15) {
+              triggerUpwardThrow();
+            } else if (ctrl.vy > 15) {
+              triggerDownwardDrop();
+            }
+          }
+        }
+      }
+
+      // Retract inactive hand nodes who lost webcam tracking
+      for (let j = 0; j < handControllers.length; j++) {
+        if (!matchedControlsIdx.has(j)) {
+          let ctrl = handControllers[j];
+          unlockCurtainPoints(ctrl);
+          if (ctrl.isPinching && ctrl.vy < -10) {
+            triggerUpwardThrow();
+          }
+          let idxToRemove = controllers.findIndex(c => c.id === ctrl.id);
+          if (idxToRemove !== -1) controllers.splice(idxToRemove, 1);
+        }
+      }
+
+      // Create new registers for newly tracked hand nodes
+      for (let i = 0; i < detectedList.length; i++) {
+        if (!matchedCreatedIdx.has(i)) {
+          let det = detectedList[i];
+          let currentThresholds = getPinchThresholds();
+          let isPinchingNow = (det.pinchRatio < currentThresholds.ratio || det.distNorm < currentThresholds.dist);
+
+          let newCtrl = {
+            id: 'hand_' + (handIdCounter++),
+            x: det.x,
+            y: det.y,
+            px: det.x,
+            py: det.y,
+            vy: 0.0,
+            pinchRatio: det.pinchRatio,
+            distNorm: det.distNorm,
+            isPinching: isPinchingNow,
+            grabbedPoints: []
+          };
+
+          controllers.push(newCtrl);
+          if (isPinchingNow) {
+            lockCurtainPoints(newCtrl);
+          }
+        }
+      }
+    }
+
+    function getPixelCoordsFromMP(landmark) {
+      if (!rawCapture || rawCapture.width <= 0) {
+        let mappedX = isWebcamMirrored ? (1.0 - landmark.x) * width : landmark.x * width;
+        let mappedY = landmark.y * height;
+        return { x: mappedX, y: mappedY };
+      }
+
+      let camW = rawCapture.width;
+      let camH = rawCapture.height;
+      let camAspect = camW / camH;
+      let screenAspect = width / height;
+
+      let drawW, drawH;
+      if (screenAspect > camAspect) {
+        drawW = width;
+        drawH = width / camAspect;
+      } else {
+        drawH = height;
+        drawW = height * camAspect;
+      }
+
+      let oX = (width - drawW) / 2;
+      let oY = (height - drawH) / 2;
+
+      let mappedX = oX + (isWebcamMirrored ? (1.0 - landmark.x) * drawW : landmark.x * drawW);
+      let mappedY = oY + landmark.y * drawH;
+
+      return { x: mappedX, y: mappedY };
+    }
+
+    // MediaPipe Initializer
+    function startSystem() {
+      // Show full loader & start webcam streams
+      document.getElementById('start-mask').classList.add('hidden');
+      systemStarted = true;
+
+      // Start webcam via standard p5 capture
+      rawCapture = createCapture(VIDEO, () => {
+        rawCapture.size(640, 480);
+        
+        // Custom robust styling to hide the video element offscreen
+        // rather than using display:none/hide(), preventing browsers from throttling or scaling down frame updates.
+        let vElt = rawCapture.elt;
+        vElt.style.position = 'absolute';
+        vElt.style.width = '640px';
+        vElt.style.height = '480px';
+        vElt.style.left = '-9999px';
+        vElt.style.top = '-9999px';
+        vElt.style.opacity = '0';
+        vElt.style.pointerEvents = 'none';
+        vElt.style.zIndex = '-9999';
+        
+        // Load MediaPipe Models
+        initializeMediaPipeTracker();
+      });
+    }
+
+    function initializeMediaPipeTracker() {
+      if (!mpHandsInstance) {
+        try {
+          mpHandsInstance = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
+          });
+
+          mpHandsInstance.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.45,
+            minTrackingConfidence: 0.45
+          });
+
+          mpHandsInstance.onResults((results) => {
+            processHandDetections(results.multiHandLandmarks);
+          });
+        } catch (initErr) {
+          console.error("Failed to instantiate MediaPipe Hands:", initErr);
+          isMediaPipeLoaded = false;
+          return;
+        }
+      }
+
+      // Hook webcam loop safely via Camera utils or fallback manual ticks
+      if (typeof Camera !== 'undefined') {
+        try {
+          let camera = new Camera(rawCapture.elt, {
+            onFrame: async () => {
+              if (systemStarted && rawCapture && rawCapture.elt && mpHandsInstance) {
+                try {
+                  await mpHandsInstance.send({ image: rawCapture.elt });
+                } catch (sendErr) {
+                  // Early initialization warnings or WASM limits caught silently
+                  console.debug("MediaPipe frame send deferred:", sendErr.message || sendErr);
+                }
+              }
+            },
+            width: 640,
+            height: 480
+          });
+
+          camera.start()
+            .then(() => {
+              isCameraActive = true;
+              isMediaPipeLoaded = !!mpHandsInstance;
+              console.log("MediaPipe initialized successfully.");
+            })
+            .catch(err => {
+              console.warn("Retrying manual feed tick loop...", err);
+              runManualFrameTick();
+            });
+        } catch (camErr) {
+          console.warn("Failed to start Camera instance, defaulting to manual frames...", camErr);
+          runManualFrameTick();
+        }
+      } else {
+        console.warn("Camera class not defined. Performing automatic manual frame ticks.");
+        runManualFrameTick();
+      }
+    }
+
+    function runManualFrameTick() {
+      isCameraActive = true;
+      isMediaPipeLoaded = !!mpHandsInstance;
+      async function frameTick() {
+        if (systemStarted && rawCapture && rawCapture.elt && mpHandsInstance) {
+          if (rawCapture.elt.readyState >= 2) {
+            try {
+              await mpHandsInstance.send({ image: rawCapture.elt });
+            } catch (err) {
+              // Capture early WASM loading ticks softly to prevent system console boundary flags
+              console.debug("Frame processing deferred:", err.message || err);
+            }
+          }
+        }
+        requestAnimationFrame(frameTick);
+      }
+      requestAnimationFrame(frameTick);
+    }
+
+    // File Input Selectors & upload pipelines
+    function triggerUpload() {
+      document.getElementById('media-upload').click();
+    }
+
+    function handleFileSelect(event) {
+      if (event.target.files && event.target.files[0]) {
+        handleFileInput(event.target.files[0]);
+      }
+    }
+
+    function handleFileInput(file) {
+      if (!file) return;
+      let fileUrl = URL.createObjectURL(file);
+      let fileType = file.type;
+
+      if (fileType.startsWith('image/')) {
+        if (uploadedVideo) {
+          uploadedVideo.stop();
+          uploadedVideo.remove();
+          uploadedVideo = null;
+        }
+        let audioBtn = document.getElementById('audio-btn');
+        if (audioBtn) audioBtn.classList.add('hidden');
+        
+        uploadedImage = loadImage(fileUrl, () => {
+          console.log("Image media successfully loaded.");
+        });
+      } else if (fileType.startsWith('video/')) {
+        if (uploadedVideo) {
+          uploadedVideo.stop();
+          uploadedVideo.remove();
+          uploadedVideo = null;
+        }
+        uploadedImage = null;
+
+        uploadedVideo = createVideo(fileUrl, () => {
+          // Play with volume ON (80%) by default so user hears sound instantly, while enabling toggle
+          if (isVideoMuted) {
+            uploadedVideo.volume(0);
+          } else {
+            uploadedVideo.volume(0.8);
+          }
+          uploadedVideo.loop();
+          uploadedVideo.hide();
+          
+          let audioBtn = document.getElementById('audio-btn');
+          if (audioBtn) audioBtn.classList.remove('hidden');
+          
+          let ind = document.getElementById('audio-indicator');
+          if (ind) {
+            if (isVideoMuted) {
+              ind.innerText = 'OFF';
+              ind.className = 'text-red-400 font-semibold font-mono';
+            } else {
+              ind.innerText = 'ON';
+              ind.className = 'text-green-300 font-semibold font-mono';
+            }
+          }
+          console.log("Video background media running.");
+        });
+      }
+    }
+
+    function toggleAudio() {
+      if (!uploadedVideo) return;
+      isVideoMuted = !isVideoMuted;
+      let indicator = document.getElementById('audio-indicator');
+      if (isVideoMuted) {
+        uploadedVideo.volume(0);
+        if (indicator) {
+          indicator.innerText = 'OFF';
+          indicator.className = 'text-red-400 font-semibold font-mono';
+        }
+      } else {
+        uploadedVideo.volume(0.8);
+        if (indicator) {
+          indicator.innerText = 'ON';
+          indicator.className = 'text-green-300 font-semibold font-mono';
+        }
+      }
+    }
+
+    // UI Interactive modifications
+    function toggleUI() {
+      showUI = !showUI;
+      let controls = document.querySelectorAll('.hud-control');
+      let eyeOpen = document.getElementById('eye-icon-open');
+      let eyeClosed = document.getElementById('eye-icon-closed');
+      
+      controls.forEach(el => {
+        if (showUI) {
+          el.classList.remove('opacity-0', 'pointer-events-none');
+          el.classList.add('opacity-100');
+        } else {
+          el.classList.remove('opacity-100');
+          el.classList.add('opacity-0', 'pointer-events-none');
+        }
+      });
+
+      if (showUI) {
+        if (eyeOpen) eyeOpen.classList.remove('hidden');
+        if (eyeClosed) eyeClosed.classList.add('hidden');
+      } else {
+        if (eyeOpen) eyeOpen.classList.add('hidden');
+        if (eyeClosed) eyeClosed.classList.remove('hidden');
+      }
+    }
+
+    function toggleMirror() {
+      isWebcamMirrored = !isWebcamMirrored;
+      let indicator = document.getElementById('mirror-indicator');
+      if (indicator) {
+        if (isWebcamMirrored) {
+          indicator.innerText = 'ON';
+          indicator.className = 'text-green-300 font-semibold font-mono';
+        } else {
+          indicator.innerText = 'OFF';
+          indicator.className = 'text-red-400 font-semibold font-mono';
+        }
+      }
+    }
+
+    function updateMediaScale(val) {
+      mediaScale = parseFloat(val);
+      let valLabel = document.getElementById('scale-value');
+      if (valLabel) {
+        valLabel.innerText = mediaScale.toFixed(1) + 'x';
+      }
+      // Instantly recreate and center the cloth mesh to match the scaled media background
+      initClothMesh();
+    }
+
+    function updatePinchSensitivity(val) {
+      pinchSensitivity = parseInt(val);
+      let valLabel = document.getElementById('sensitivity-value');
+      if (valLabel) {
+        valLabel.innerText = pinchSensitivity + '%';
+      }
+    }
+
+    // --- Scenario Interaction Helpers ---
+    function switchScenario(num) {
+      if (currentScenario === num) return;
+      currentScenario = num;
+      
+      // Update Segmented Control UI classes
+      let btn1 = document.getElementById('scenario-1-btn');
+      let btn2 = document.getElementById('scenario-2-btn');
+      
+      if (btn1 && btn2) {
+        if (currentScenario === 1) {
+          btn1.className = "px-3.5 py-1.5 rounded-full text-[10px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white bg-white/10 border border-white/5 shadow-md";
+          btn2.className = "px-3.5 py-1.5 rounded-full text-[10px] font-medium tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white/60 hover:text-white hover:bg-white/5";
+        } else {
+          btn2.className = "px-3.5 py-1.5 rounded-full text-[10px] font-semibold tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white bg-white/10 border border-white/5 shadow-md";
+          btn1.className = "px-3.5 py-1.5 rounded-full text-[10px] font-medium tracking-wider transition-all cursor-pointer flex items-center gap-1.5 text-white/60 hover:text-white hover:bg-white/5";
+        }
+      }
+      
+      resetClothMesh();
+    }
+
+    function simulateTearAction() {
+      if (currentScenario === 2 && !isTorn && !simulatedTearActive) {
+        simulatedTearActive = true;
+      }
+    }
+
+    function triggerTearExplosion() {
+      let midCol = Math.floor(cols / 2) - 1;
+      for (let r = 0; r < rows; r++) {
+        // Push left half leftward
+        let pLeft = points[midCol][r];
+        pLeft.px = pLeft.x + random(45, 80); 
+        pLeft.py = pLeft.y + random(-10, 10);
+
+        // Push right half rightward
+        let pRight = points[midCol + 1][r];
+        pRight.px = pRight.x - random(45, 80);
+        pRight.py = pRight.y + random(-10, 10);
+      }
+    }
+
+    // p5.js Double Click Event
+    function doubleClicked() {
+      if (currentScenario === 2 && !isTorn) {
+        let cX = width / 2;
+        let cY = (startY * 2 + clothHeight) / 2;
+        if (dist(mouseX, mouseY, cX, cY) < clothWidth / 1.5) {
+          simulateTearAction();
+        }
+      }
+    }
+
+    // p5.js Keyboard Event
+    function keyPressed() {
+      if (key === 't' || key === 'T' || key === 'p' || key === 'P') {
+        simulateTearAction();
+      }
+    }
+  </script>
+</body>
+</html>

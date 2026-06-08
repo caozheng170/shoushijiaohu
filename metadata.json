@@ -1,0 +1,6 @@
+{
+  "name": "透明物理幕布手势交互",
+  "description": "基于p5.js与MediaPipe Hands手势控制的柔性物理交互系统。包含‘场景一：电视幕布’与‘场景二：撕破保鲜膜’玩法。支持单/双手捏合拉扯、上抛/下甩、以及双手撕裂薄膜，融合高精度Verlet物理悬挂和不规则网格折射折叠渲染。",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
